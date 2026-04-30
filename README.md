@@ -2,16 +2,26 @@
 
 **Claude Chat Pro — fully local on Apple Silicon.**
 
-oMLX (fast + vision) + Open Interpreter (full sandbox) + rich Artifacts + attachments (PDF, JSON, MD, PNG, JPEG) + paste.
+oMLX (speed + vision) + Open Interpreter (full sandbox) + rich chat UI.
 
 ## Quick Start
 
-1. Run oMLX server
-2. Backend:
-   cd backend && pip install -e . && uvicorn main:app --reload --port 8001
-3. Frontend:
-   cd frontend && npm install && npm run dev
+```bash
+# 1. Clone & setup
+cd ~/Documents/Projects/omlx-interpreter
+./setup.sh
 
+# 2. Start backend
+cd backend && uvicorn main:app --reload --port 8001
+
+# 3. Start frontend (new terminal)
+cd frontend && npm install && npm run dev
 Open http://localhost:3000
+Features
 
-License: Apache 2.0
+Full drag & drop + paste support (PDF, JSON, MD, PNG, JPEG)
+Vision support via oMLX
+Real filesystem sandbox (read/write/create)
+Streaming responses
+
+Status: MVP in progress

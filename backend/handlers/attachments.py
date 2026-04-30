@@ -1,7 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, Form
 from pathlib import Path
 import base64
-import fitz  # PyMuPDF for PDFs
+import fitz  # PyMuPDF
 
 router = APIRouter(prefix="/attachments")
 
@@ -26,12 +26,18 @@ async def upload_attachment(
         "type": file.content_type or "unknown"
     }
 
-    # Special handling for different file types
+    # Prepare content for oMLX vision
     if file.content_type and file.content_type.startswith("image/"):
-        result["base64"] = base64.b64encode(content).decode()
+        result["content"] = [{
+            "type": "image_url",
+            "image_url": {"url": f"data:{file.content_type};base64,{base64.b64encode(content).decode()}"}
+        }]
     elif file.content_type == "application/pdf":
-        # Convert PDF pages to images for oMLX vision
         doc = fitz.open(stream=content, filetype="pdf")
         result["pages"] = len(doc)
-    
+        result["content"] = [{"type": "text", "text": f"PDF with {len(doc)} pages: {file.filename}"}]
+    else:
+        # JSON, Markdown, text
+        result["content"] = [{"type": "text", "text": content.decode('utf-8', errors='ignore')}]
+
     return result
