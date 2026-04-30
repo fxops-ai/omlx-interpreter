@@ -17,8 +17,4 @@ app.include_router(chat_router)
 
 @app.get("/")
 async def root():
-    return {"status": "oMLX-Interpreter backend is running - Ready for oMLX + Open Interpreter"}
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001, reload=True)
+    return {"status": "oMLX-Interpreter backend running"}
