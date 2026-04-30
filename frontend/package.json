@@ -1,0 +1,15 @@
+{
+  "name": "omlxi-frontend",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build"
+  },
+  "dependencies": {
+    "next": "15.0.0",
+    "react": "^19.0.0-rc",
+    "react-dom": "^19.0.0-rc",
+    "tailwindcss": "^3.4.0",
+    "react-dropzone": "^14.2.3"
+  }
+}

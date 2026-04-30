@@ -1,0 +1,7 @@
+[project]
+name = "omlxi-backend"
+version = "0.1.0"
+dependencies = [
+    "fastapi", "uvicorn[standard]", "open-interpreter>=0.3",
+    "litellm", "pymupdf", "pdf2image", "pillow", "python-multipart", "pydantic"
+]
