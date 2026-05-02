@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: omlxi-backend
+Version: 0.1.0
+Requires-Dist: fastapi
+Requires-Dist: uvicorn[standard]
+Requires-Dist: open-interpreter @ git+https://github.com/openinterpreter/open-interpreter.git
+Requires-Dist: litellm
+Requires-Dist: pymupdf
+Requires-Dist: pdf2image
+Requires-Dist: pillow
+Requires-Dist: python-multipart
+Requires-Dist: pydantic
+Requires-Dist: tiktoken>=0.12.0

@@ -2,6 +2,17 @@
 name = "omlxi-backend"
 version = "0.1.0"
 dependencies = [
-    "fastapi", "uvicorn[standard]", "open-interpreter>=0.3",
-    "litellm", "pymupdf", "pdf2image", "pillow", "python-multipart", "pydantic"
+    "fastapi",
+    "uvicorn[standard]",
+    "open-interpreter @ git+https://github.com/openinterpreter/open-interpreter.git",
+    "litellm",
+    "pymupdf",
+    "pdf2image",
+    "pillow",
+    "python-multipart",
+    "pydantic",
+    "tiktoken>=0.12.0"
 ]
+
+[tool.setuptools]
+packages = ["handlers", "utils"]

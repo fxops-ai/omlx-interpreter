@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+open-interpreter @ git+https://github.com/openinterpreter/open-interpreter.git
+litellm
+pymupdf
+pdf2image
+pillow
+python-multipart
+pydantic
+tiktoken>=0.12.0

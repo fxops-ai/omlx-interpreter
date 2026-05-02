@@ -35,7 +35,9 @@ async def upload_attachment(
     elif file.content_type == "application/pdf":
         doc = fitz.open(stream=content, filetype="pdf")
         result["pages"] = len(doc)
-        result["content"] = [{"type": "text", "text": f"PDF with {len(doc)} pages: {file.filename}"}]
+        # Better text preview
+        text = "".join([page.get_text()[:500] for page in doc])  # first 500 chars
+        result["content"] = [{"type": "text", "text": f"PDF: {file.filename}\n\n{text}..."}]
     else:
         # JSON, Markdown, text
         result["content"] = [{"type": "text", "text": content.decode('utf-8', errors='ignore')}]
