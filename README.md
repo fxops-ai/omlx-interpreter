@@ -19,6 +19,16 @@ The result: a local AI assistant that can see images, run code, read your PDFs, 
 
 ---
 
+## Why this exists
+
+The closest thing to this was [Open WebUI](https://github.com/open-webui/open-webui) — but Open WebUI requires a Python 3.12 venv and its React dependencies compound the setup complexity. For a local tool you just want to clone and run, that's meaningful friction.
+
+oMLX already solved the hard part: fast, stable local inference on Apple Silicon with vision support. What was missing was a sandbox layer — something that lets the model actually *do* things locally the way Claude does in the cloud: write files, run code, read your documents, iterate on output. Open Interpreter fills that role without any additional infrastructure.
+
+The `--legacy-peer-deps` flag in the npm install is the deliberate tradeoff: it sidesteps the React/Python 3.13 dependency conflicts that would otherwise require a venv, keeping setup a single `./setup.sh` away.
+
+---
+
 ## Features
 
 | Capability | Detail |
@@ -38,7 +48,7 @@ The result: a local AI assistant that can see images, run code, read your PDFs, 
 - Apple Silicon Mac (M1 or later)
 - macOS 13 Ventura or later
 - [oMLX](https://github.com/jundot/omlx) installed and running (see below)
-- Python 3.11+
+- Python 3.13+
 - Node.js 18+
 
 ---
@@ -67,13 +77,13 @@ cd omlx-interpreter
 ./setup.sh
 ```
 
-`setup.sh` installs Python dependencies (including Open Interpreter) and Node packages.
+`setup.sh` installs Python dependencies (including Open Interpreter) and Node packages. Uses `--legacy-peer-deps` to resolve React dependency conflicts on Python 3.13.
 
 ### 3. Start the backend
 
 ```bash
 cd backend
-uvicorn main:app --reload --port 8001
+uvicorn main:app --host 127.0.0.1 --port 8002 --reload
 ```
 
 ### 4. Start the frontend
@@ -83,7 +93,7 @@ cd frontend
 npm run dev
 ```
 
-Open **http://localhost:3000** — you're live.
+Open **http://localhost:3010** — you're live.
 
 ---
 
@@ -106,9 +116,9 @@ omlx-interpreter/
 ## How It Works
 
 ```
-Browser (localhost:3000)
+Browser (localhost:3010)
         ↕  HTTP / SSE streaming
-FastAPI backend (localhost:8001)
+FastAPI backend (localhost:8002)
         ↕  Open Interpreter (code execution, filesystem)
         ↕  oMLX API (localhost:8000/v1)
                 ↕  Local model weights (MLX, Apple Silicon)
@@ -123,7 +133,7 @@ The backend acts as an orchestration layer: it routes messages to oMLX for gener
 By default the backend expects oMLX at `http://localhost:8000`. To point it at a different host or port, set the environment variable before starting:
 
 ```bash
-OMLX_BASE_URL=http://localhost:8000 uvicorn main:app --reload --port 8001
+OMLX_BASE_URL=http://localhost:8000 uvicorn main:app --host 127.0.0.1 --port 8002 --reload
 ```
 
 Model selection is handled through the oMLX admin interface at `http://localhost:8000/admin`. Can also be selected in the chat interface at the user prompt.
