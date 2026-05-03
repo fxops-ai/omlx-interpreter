@@ -3,6 +3,7 @@ import asyncio
 import base64
 import mimetypes
 import os
+import re
 import threading
 import traceback
 import uuid
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Set
 
 import httpx
+import tiktoken
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -23,7 +25,30 @@ router = APIRouter(prefix="/chat")
 OMLX_BASE    = "http://127.0.0.1:8000/v1"
 OMLX_API_KEY = os.getenv("OMLX_API_KEY", "dummy")
 
-SANDBOX_ROOT = Path(__file__).parents[2] / "sandbox"
+SANDBOX_ROOT  = Path(__file__).parents[2] / "sandbox"
+CONTEXT_MAX   = 32_000
+
+# ---------------------------------------------------------------------------
+# Token counting helper
+# ---------------------------------------------------------------------------
+def count_tokens(messages: list) -> int:
+    """Estimate token usage across interpreter.messages using tiktoken cl100k_base."""
+    try:
+        enc = tiktoken.get_encoding("cl100k_base")
+        total = 0
+        for m in messages:
+            content = m.get("content", "")
+            if isinstance(content, str):
+                total += len(enc.encode(content))
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and "content" in block:
+                        total += len(enc.encode(str(block["content"])))
+        return total
+    except Exception as e:
+        print(f"[TOKENS] count failed: {e}")
+        return 0
+
 
 # ---------------------------------------------------------------------------
 # System prompt — injected into every session
@@ -282,18 +307,76 @@ async def chat_websocket(websocket: WebSocket):
                     elif "end" in chunk:
                         # Save the code block as a file in the sandbox
                         ext_map = {
+                            # code
                             "python": "py", "javascript": "js", "typescript": "ts",
                             "bash": "sh", "shell": "sh", "ruby": "rb",
                             "rust": "rs", "go": "go", "java": "java",
+                            "c": "c", "cpp": "cpp", "cs": "cs", "php": "php",
+                            "swift": "swift", "kotlin": "kt", "r": "r", "sql": "sql",
+                            # markup / data / text
+                            "markdown": "md", "md": "md",
+                            "html": "html", "xml": "xml", "svg": "svg",
+                            "css": "css", "scss": "scss",
+                            "json": "json", "yaml": "yaml", "yml": "yml",
+                            "toml": "toml", "ini": "ini", "csv": "csv",
+                        }
+                        mime_map = {
+                            "py":   "text/x-python",
+                            "js":   "text/javascript",
+                            "ts":   "text/typescript",
+                            "sh":   "text/x-sh",
+                            "md":   "text/markdown",
+                            "html": "text/html",
+                            "css":  "text/css",
+                            "json": "application/json",
+                            "yaml": "text/yaml", "yml": "text/yaml",
+                            "xml":  "application/xml",
+                            "svg":  "image/svg+xml",
+                            "csv":  "text/csv",
+                            "sql":  "text/x-sql",
                         }
                         ext = ext_map.get(current_lang, "txt")
-                        code_filename = f"script_{uuid.uuid4().hex[:6]}.{ext}"
+
+                        # Try to derive a meaningful filename from the content.
+                        # 1. First line is a shell shebang or a comment with a filename hint:
+                        #    e.g. "# recipe.md", "// utils.js", "<!-- index.html -->"
+                        # 2. First heading in markdown: "# Recipe Title" → recipe-title.md
+                        # 3. Fall back to script_{short_id}.{ext}
+                        inferred_name: str | None = None
+                        first_line = current_code.lstrip().split("\n")[0].strip()
+
+                        # Pattern: comment containing a filename with an extension
+                        # e.g. "# recipe.md", "// config.json", "<!-- index.html -->"
+                        fname_comment = re.search(
+                            r'[\w\-. ]+\.([a-zA-Z0-9]+)',
+                            re.sub(r'^(#|//|/\*|<!--|--)', '', first_line).strip()
+                        )
+                        if fname_comment:
+                            candidate = fname_comment.group(0).strip().replace(" ", "-")
+                            # Only accept if it has a recognised extension
+                            if "." in candidate and len(candidate) <= 64:
+                                inferred_name = candidate
+
+                        # Markdown heading → slugified filename
+                        if not inferred_name and ext == "md":
+                            heading = re.match(r'^#{1,3}\s+(.+)', first_line)
+                            if heading:
+                                slug = re.sub(r'[^\w\s-]', '', heading.group(1).lower())
+                                slug = re.sub(r'[\s_]+', '-', slug).strip('-')[:40]
+                                if slug:
+                                    inferred_name = f"{slug}.md"
+
+                        code_filename = inferred_name or f"script_{uuid.uuid4().hex[:6]}.{ext}"
+                        # Ensure the extension matches the language even if inferred name had none
+                        if "." not in code_filename:
+                            code_filename = f"{code_filename}.{ext}"
+
                         code_path = sandbox_dir / code_filename
                         code_path.write_text(current_code, encoding="utf-8")
                         emitted_scripts.add(code_filename)
                         print(f"[FILE] Saved code: {code_path}")
-                        # Emit as file artifact
-                        mime = "text/x-python" if ext == "py" else "text/plain"
+
+                        mime = mime_map.get(ext, "text/plain")
                         await ws.send_json({
                             "type": "artifact",
                             "data": {
@@ -331,6 +414,10 @@ async def chat_websocket(websocket: WebSocket):
                     pass  # auto_run=True, never need to handle
 
             await ws.send_json({"type": "done"})
+            # Emit token usage after every completed turn
+            used = count_tokens(interpreter.messages)
+            await ws.send_json({"type": "context", "used": used, "max": CONTEXT_MAX})
+            print(f"[TOKENS] used={used} / max={CONTEXT_MAX}")
 
         except asyncio.CancelledError:
             stop_flag.set()

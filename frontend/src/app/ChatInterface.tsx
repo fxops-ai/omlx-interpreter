@@ -183,6 +183,29 @@ const css = `
   .dot:nth-child(2) { animation-delay: 0.2s; }
   .dot:nth-child(3) { animation-delay: 0.4s; }
   @keyframes pulse { 0%,100% { opacity: 0.2; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.1); } }
+
+  /* ---- Context window bar ---- */
+  .ctx-bar-wrap {
+    position: relative; display: flex; align-items: center;
+    width: 80px; height: 4px; border-radius: 2px;
+    background: var(--border-mid); overflow: visible;
+    cursor: default;
+  }
+  .ctx-bar-fill {
+    height: 100%; border-radius: 2px;
+    transition: width 0.4s ease, background-color 0.4s ease;
+  }
+  .ctx-tooltip {
+    display: none;
+    position: absolute; bottom: calc(100% + 7px); right: 0;
+    background: #1a1a1a; border: 1px solid var(--border-mid);
+    border-radius: 6px; padding: 5px 10px;
+    font-family: var(--font-mono); font-size: 10px;
+    color: var(--text-dim); white-space: nowrap;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    pointer-events: none; z-index: 200;
+  }
+  .ctx-bar-wrap:hover .ctx-tooltip { display: block; }
 `;
 
 // ---------------------------------------------------------------------------
@@ -220,6 +243,19 @@ function StopIcon() {
   );
 }
 
+function ContextBar({ used, max }: { used: number | null; max: number }) {
+  if (used === null) return null;
+  const pct    = Math.min(used / max, 1);
+  const color  = pct < 0.6 ? '#22c55e' : pct < 0.85 ? '#f59e0b' : '#ef4444';
+  const fmtNum = (n: number) => n.toLocaleString();
+  return (
+    <div className="ctx-bar-wrap">
+      <div className="ctx-bar-fill" style={{ width: `${pct * 100}%`, background: color }} />
+      <div className="ctx-tooltip">{fmtNum(used)} / {fmtNum(max)} tokens</div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -234,6 +270,8 @@ export default function oMLXInterpreter() {
   const [sessionId, setSessionId]               = useState<string | undefined>(undefined);
   const [fileTreeTick, setFileTreeTick]         = useState(0);
   const [statusMsg, setStatusMsg]               = useState<string | null>(null);
+  const [ctxUsed, setCtxUsed]                   = useState<number | null>(null);
+  const CTX_MAX = 32_000;
 
   // Model selector
   const [models, setModels]               = useState<ModelOption[]>([]);
@@ -347,6 +385,12 @@ export default function oMLXInterpreter() {
       if (chunk.type === 'done') {
         setIsLoading(false);
         setStatusMsg(null);
+        return;
+      }
+
+      // Context window usage
+      if (chunk.type === 'context') {
+        setCtxUsed(chunk.used ?? null);
         return;
       }
 
@@ -474,6 +518,7 @@ export default function oMLXInterpreter() {
             <div className="header-meta">
               <span className="status-dot">● LIVE</span>
               <span className="status-model">{selectedModel || 'connecting…'} · local</span>
+              <ContextBar used={ctxUsed} max={CTX_MAX} />
             </div>
           </div>
 
