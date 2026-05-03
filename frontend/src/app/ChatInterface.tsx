@@ -1,13 +1,15 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { useDropzone } from 'react-dropzone';
 import FileTree from '../components/FileTree';
 import ArtifactRenderer from '../components/ArtifactRenderer';
 import CodeApproval from '../components/CodeApproval';
 import { uploadAttachment } from '../lib/api';
+import { BACKEND_WS } from '../lib/config';
 
 // ---------------------------------------------------------------------------
 // Self-contained styles
@@ -71,7 +73,6 @@ const css = `
   .bubble.user   { background: var(--user-bg); border: 1px solid var(--user-border); color: var(--text); border-bottom-right-radius: 4px; }
   .bubble.assistant { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-bottom-left-radius: 4px; }
 
-  /* Interrupted badge — shown at end of a truncated assistant message */
   .interrupted-badge {
     display: inline-flex; align-items: center; gap: 5px;
     margin-top: 8px;
@@ -100,6 +101,7 @@ const css = `
 
   .attachments   { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
   .att-chip      { font-size: 11px; font-family: var(--font-mono); background: rgba(255,255,255,0.06); border: 1px solid var(--border); padding: 3px 10px; border-radius: 20px; display: flex; align-items: center; gap: 5px; }
+  .att-chip.unavailable { opacity: 0.4; text-decoration: line-through; }
 
   /* ---- Input bar ---- */
   .input-bar     { padding: 16px 24px 20px; border-top: 1px solid var(--border); background: var(--bg); flex-shrink: 0; }
@@ -156,7 +158,6 @@ const css = `
   .send-btn.idle:hover:not(:disabled) { opacity: 0.85; }
   .send-btn.idle:disabled { opacity: 0.35; cursor: not-allowed; }
 
-  /* Stop state — red, pulsing border */
   .send-btn.stop  {
     background: var(--stop-dim);
     color: var(--stop);
@@ -206,6 +207,77 @@ const css = `
     pointer-events: none; z-index: 200;
   }
   .ctx-bar-wrap:hover .ctx-tooltip { display: block; }
+
+  /* ---- Sidebar tabs ---- */
+  .sidebar-tabs  { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .sidebar-tab   {
+    flex: 1; padding: 10px 0; text-align: center;
+    font-family: var(--font-mono); font-size: 10px;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--text-dim); cursor: pointer; border: none; background: transparent;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .sidebar-tab:hover { color: var(--text); }
+  .sidebar-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ---- History panel ---- */
+  .history-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #0a0a0a; }
+  .history-search-wrap { padding: 10px 10px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .history-search {
+    width: 100%; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--text);
+    outline: none; transition: border-color 0.15s;
+  }
+  .history-search:focus { border-color: var(--accent); }
+  .history-search::placeholder { color: var(--text-faint); }
+
+  .history-new-btn {
+    width: calc(100% - 20px); margin: 8px 10px 0;
+    padding: 7px 0; background: transparent;
+    border: 1px solid var(--border-mid); border-radius: 8px;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em;
+    color: var(--text-dim); cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .history-new-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+
+  .history-list  { flex: 1; overflow-y: auto; padding: 6px 0; }
+  .history-list::-webkit-scrollbar { width: 3px; }
+  .history-list::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 2px; }
+
+  .history-item  {
+    padding: 9px 12px; cursor: pointer;
+    border-left: 2px solid transparent;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .history-item:hover { background: #141414; }
+  .history-item.active { border-left-color: var(--accent); background: var(--accent-dim); }
+
+  .history-item-title {
+    font-family: var(--font-sans); font-size: 12px; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    margin-bottom: 3px;
+  }
+  .history-item-meta  {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
+  }
+  .history-model-chip {
+    background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 5px; font-size: 9px; color: var(--text-faint);
+    max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .history-excerpt {
+    font-family: var(--font-mono); font-size: 10px; color: var(--text-faint);
+    margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .history-empty {
+    padding: 24px 12px; font-family: var(--font-mono); font-size: 11px;
+    color: var(--text-faint); text-align: center;
+  }
 `;
 
 // ---------------------------------------------------------------------------
@@ -224,12 +296,43 @@ interface ModelOption {
   label: string;
 }
 
+interface SessionSummary {
+  session_id: string;
+  title: string;
+  updated_at: string;
+  model: string;
+  message_count: number;
+  artifact_count: number;
+}
+
+interface SearchResult {
+  session_id: string;
+  title: string;
+  updated_at: string;
+  match_excerpt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function relativeDate(iso: string): string {
+  const now  = Date.now();
+  const then = new Date(iso).getTime();
+  const diff = now - then;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 2)   return 'just now';
+  if (mins < 60)  return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24)   return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days === 1) return 'yesterday';
+  if (days < 7)   return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 function Chevron({ open }: { open: boolean }) {
   return (
-    <svg
-      className={`model-btn-chevron${open ? ' open' : ''}`}
-      width="10" height="10" viewBox="0 0 10 10" fill="none"
-    >
+    <svg className={`model-btn-chevron${open ? ' open' : ''}`} width="10" height="10" viewBox="0 0 10 10" fill="none">
       <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
@@ -245,8 +348,8 @@ function StopIcon() {
 
 function ContextBar({ used, max }: { used: number | null; max: number }) {
   if (used === null) return null;
-  const pct    = Math.min(used / max, 1);
-  const color  = pct < 0.6 ? '#22c55e' : pct < 0.85 ? '#f59e0b' : '#ef4444';
+  const pct   = Math.min(used / max, 1);
+  const color = pct < 0.6 ? '#22c55e' : pct < 0.85 ? '#f59e0b' : '#ef4444';
   const fmtNum = (n: number) => n.toLocaleString();
   return (
     <div className="ctx-bar-wrap">
@@ -257,21 +360,126 @@ function ContextBar({ used, max }: { used: number | null; max: number }) {
 }
 
 // ---------------------------------------------------------------------------
+// History Panel
+// ---------------------------------------------------------------------------
+function HistoryPanel({
+  currentSessionId,
+  onSwitch,
+  onNew,
+}: {
+  currentSessionId: string | undefined;
+  onSwitch: (id: string) => void;
+  onNew: () => void;
+}) {
+  const [sessions, setSessions]           = useState<SessionSummary[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
+  const [query, setQuery]                 = useState('');
+  const [loading, setLoading]             = useState(false);
+  const searchTimerRef                    = useRef<ReturnType<typeof setTimeout>>();
+
+  const fetchSessions = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res  = await fetch('/api/chat/sessions');
+      const data = await res.json();
+      setSessions(data.sessions ?? []);
+    } catch (e) {
+      console.error('[history] fetch failed:', e);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchSessions(); }, [currentSessionId, fetchSessions]);
+
+  // Debounced search
+  useEffect(() => {
+    clearTimeout(searchTimerRef.current);
+    if (!query.trim()) { setSearchResults(null); return; }
+    searchTimerRef.current = setTimeout(async () => {
+      try {
+        const res  = await fetch(`/api/chat/sessions/search?q=${encodeURIComponent(query.trim())}`);
+        const data = await res.json();
+        setSearchResults(data.results ?? []);
+      } catch (e) {
+        console.error('[history search] failed:', e);
+      }
+    }, 300);
+    return () => clearTimeout(searchTimerRef.current);
+  }, [query]);
+
+  const displayItems: Array<SessionSummary | SearchResult> =
+    searchResults !== null ? searchResults : sessions;
+
+  return (
+    <div className="history-panel">
+      <div className="history-search-wrap">
+        <input
+          className="history-search"
+          type="text"
+          placeholder="Search sessions…"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+        />
+      </div>
+
+      <button className="history-new-btn" onClick={onNew}>
+        <span style={{ fontSize: 14, lineHeight: 1 }}>+</span>
+        NEW SESSION
+      </button>
+
+      <div className="history-list">
+        {loading && displayItems.length === 0 && (
+          <div className="history-empty">loading…</div>
+        )}
+        {!loading && displayItems.length === 0 && (
+          <div className="history-empty">
+            {searchResults !== null ? 'no matches' : 'no sessions yet'}
+          </div>
+        )}
+        {displayItems.map(item => (
+          <div
+            key={item.session_id}
+            className={`history-item${item.session_id === currentSessionId ? ' active' : ''}`}
+            onClick={() => onSwitch(item.session_id)}
+          >
+            <div className="history-item-title">{item.title || item.session_id}</div>
+            <div className="history-item-meta">
+              <span>{relativeDate(item.updated_at)}</span>
+              {'model' in item && item.model && (
+                <span className="history-model-chip">{item.model}</span>
+              )}
+              {'message_count' in item && (
+                <span style={{ color: 'var(--text-faint)' }}>{item.message_count} msgs</span>
+              )}
+            </div>
+            {'match_excerpt' in item && item.match_excerpt && (
+              <div className="history-excerpt">{item.match_excerpt}</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 export default function oMLXInterpreter() {
-  const [messages, setMessages]                 = useState<ChatMessage[]>([]);
-  const [input, setInput]                       = useState('');
-  const [isLoading, setIsLoading]               = useState(false);
+  const [messages, setMessages]                     = useState<ChatMessage[]>([]);
+  const [input, setInput]                           = useState('');
+  const [isLoading, setIsLoading]                   = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<any[]>([]);
-  const [showApproval, setShowApproval]         = useState(false);
-  const [pendingApproval, setPendingApproval]   = useState<any>(null);
-  const [artifacts, setArtifacts]               = useState<any[]>([]);
-  const [sessionId, setSessionId]               = useState<string | undefined>(undefined);
-  const [fileTreeTick, setFileTreeTick]         = useState(0);
-  const [statusMsg, setStatusMsg]               = useState<string | null>(null);
-  const [ctxUsed, setCtxUsed]                   = useState<number | null>(null);
+  const [showApproval, setShowApproval]             = useState(false);
+  const [pendingApproval, setPendingApproval]       = useState<any>(null);
+  const [artifacts, setArtifacts]                   = useState<any[]>([]);
+  const [sessionId, setSessionId]                   = useState<string | undefined>(undefined);
+  const [fileTreeTick, setFileTreeTick]             = useState(0);
+  const [statusMsg, setStatusMsg]                   = useState<string | null>(null);
+  const [ctxUsed, setCtxUsed]                       = useState<number | null>(null);
   const CTX_MAX = 32_000;
+
+  const [sidebarTab, setSidebarTab] = useState<'files' | 'history'>('files');
 
   // Model selector
   const [models, setModels]               = useState<ModelOption[]>([]);
@@ -289,11 +497,10 @@ export default function oMLXInterpreter() {
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   useEffect(() => { scrollToBottom(); }, [messages, artifacts]);
 
-  // Fetch model list
   const fetchModels = async () => {
     setModelsLoading(true);
     try {
-      const res  = await fetch('http://localhost:8002/chat/models');
+      const res  = await fetch('/api/chat/models');
       const data = await res.json();
       const list: ModelOption[] = data.models ?? [];
       setModels(list);
@@ -306,7 +513,6 @@ export default function oMLXInterpreter() {
 
   useEffect(() => { fetchModels(); }, []);
 
-  // Close model dropdown on outside click
   useEffect(() => {
     if (!modelDropOpen) return;
     const handler = (e: MouseEvent) => {
@@ -319,29 +525,31 @@ export default function oMLXInterpreter() {
   }, [modelDropOpen]);
 
   // ---------------------------------------------------------------------------
-  // WebSocket
+  // WebSocket — reusable, called on mount and session switch
   // ---------------------------------------------------------------------------
-  useEffect(() => {
-    const ws = new WebSocket('ws://127.0.0.1:8002/chat/ws');
+  const setupWs = useCallback((targetSessionId?: string) => {
+    if (wsRef.current) {
+      wsRef.current.onmessage = null;
+      wsRef.current.onclose   = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    const url = targetSessionId
+      ? `${BACKEND_WS}/chat/ws?session_id=${targetSessionId}`
+      : `${BACKEND_WS}/chat/ws`;
+
+    const ws = new WebSocket(url);
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
       let chunk;
-      try {
-        chunk = JSON.parse(event.data);
-      } catch (e) {
-        console.error('PARSE FAIL:', event.data, e);
-        return;
-      }
+      try { chunk = JSON.parse(event.data); }
+      catch (e) { console.error('PARSE FAIL:', event.data, e); return; }
       console.log('CHUNK:', chunk);
 
-      // Session ID from backend — used to scope FileTree
-      if (chunk.type === 'session') {
-        setSessionId(chunk.session_id);
-        return;
-      }
+      if (chunk.type === 'session') { setSessionId(chunk.session_id); return; }
 
-      // Text delta — append to current assistant message or start a new one
       if (chunk.type === 'delta' && chunk.content) {
         setStatusMsg(null);
         setMessages(prev => {
@@ -357,44 +565,25 @@ export default function oMLXInterpreter() {
         return;
       }
 
-      // Status messages ("Executing...", "Code rejected — skipping." etc.)
-      if (chunk.type === 'status') {
-        setStatusMsg(chunk.content ?? null);
-        return;
-      }
+      if (chunk.type === 'status') { setStatusMsg(chunk.content ?? null); return; }
 
-      // Artifacts — output, file, image, html
       if (chunk.type === 'artifact' && chunk.data) {
         setStatusMsg(null);
         setArtifacts(prev => [...prev, chunk.data]);
-        // File artifact — ping FileTree to refresh
-        if (chunk.data.type === 'file') {
-          setFileTreeTick(t => t + 1);
-        }
+        if (chunk.data.type === 'file') setFileTreeTick(t => t + 1);
         return;
       }
 
-      // Code approval request
       if (chunk.type === 'approval_request') {
         setPendingApproval(chunk);
         setShowApproval(true);
         return;
       }
 
-      // Stream done
-      if (chunk.type === 'done') {
-        setIsLoading(false);
-        setStatusMsg(null);
-        return;
-      }
+      if (chunk.type === 'done') { setIsLoading(false); setStatusMsg(null); return; }
 
-      // Context window usage
-      if (chunk.type === 'context') {
-        setCtxUsed(chunk.used ?? null);
-        return;
-      }
+      if (chunk.type === 'context') { setCtxUsed(chunk.used ?? null); return; }
 
-      // Interrupt confirmed by backend
       if (chunk.type === 'interrupted') {
         setIsLoading(false);
         setStatusMsg(null);
@@ -409,7 +598,6 @@ export default function oMLXInterpreter() {
         return;
       }
 
-      // Error
       if (chunk.type === 'error') {
         setMessages(prev => [...prev, { role: 'assistant', content: chunk.content, isError: true }]);
         setIsLoading(false);
@@ -417,9 +605,48 @@ export default function oMLXInterpreter() {
       }
     };
 
-    ws.onclose = (e) => console.log('[WS CLOSE] code:', e.code, 'reason:', e.reason, 'wasClean:', e.wasClean);
-    return () => ws.close();
+    ws.onclose = (e) => console.log('[WS CLOSE] code:', e.code, 'reason:', e.reason);
   }, []);
+
+  useEffect(() => {
+    setupWs();
+    return () => { wsRef.current?.close(); };
+  }, [setupWs]);
+
+  // ---------------------------------------------------------------------------
+  // Session switching
+  // ---------------------------------------------------------------------------
+  const switchSession = useCallback(async (targetId: string) => {
+    if (targetId === sessionId) return;
+
+    setIsLoading(false);
+    setStatusMsg(null);
+    setArtifacts([]);
+
+    try {
+      const res  = await fetch(`/api/chat/sessions/${targetId}`);
+      const data = await res.json();
+      const msgs: ChatMessage[] = (data.messages ?? []).map((m: any) => ({
+        role:    m.role,
+        content: m.content,
+      }));
+      setMessages(msgs);
+    } catch (e) {
+      console.error('[switchSession] fetch failed:', e);
+      setMessages([]);
+    }
+
+    setupWs(targetId);
+  }, [sessionId, setupWs]);
+
+  const startNewSession = useCallback(() => {
+    setMessages([]);
+    setArtifacts([]);
+    setCtxUsed(null);
+    setStatusMsg(null);
+    setIsLoading(false);
+    setupWs();
+  }, [setupWs]);
 
   // ---------------------------------------------------------------------------
   // File drop
@@ -439,8 +666,8 @@ export default function oMLXInterpreter() {
     if ((!input.trim() && pendingAttachments.length === 0) || isLoading) return;
 
     const userMsg: ChatMessage = {
-      role: 'user',
-      content: input.trim() || `Attached ${pendingAttachments.length} file(s)`,
+      role:        'user',
+      content:     input.trim() || `Attached ${pendingAttachments.length} file(s)`,
       attachments: [...pendingAttachments],
     };
 
@@ -458,16 +685,10 @@ export default function oMLXInterpreter() {
     }));
   };
 
-  // ---------------------------------------------------------------------------
-  // Interrupt
-  // ---------------------------------------------------------------------------
   const interruptStream = () => {
     wsRef.current?.send(JSON.stringify({ type: 'interrupt' }));
   };
 
-  // ---------------------------------------------------------------------------
-  // Approval handlers
-  // ---------------------------------------------------------------------------
   const handleApprove = () => {
     wsRef.current?.send(JSON.stringify({ type: 'approve', id: pendingApproval.id }));
     setShowApproval(false);
@@ -495,11 +716,34 @@ export default function oMLXInterpreter() {
       <div className="shell">
         {/* Sidebar */}
         <div className="sidebar">
-          <FileTree
-            sessionId={sessionId}
-            refreshTrigger={fileTreeTick}
-            onFileSelect={(path) => console.log('Selected:', path)}
-          />
+          <div className="sidebar-tabs">
+            <button
+              className={`sidebar-tab${sidebarTab === 'files' ? ' active' : ''}`}
+              onClick={() => setSidebarTab('files')}
+            >
+              Files
+            </button>
+            <button
+              className={`sidebar-tab${sidebarTab === 'history' ? ' active' : ''}`}
+              onClick={() => setSidebarTab('history')}
+            >
+              History
+            </button>
+          </div>
+
+          {sidebarTab === 'files' ? (
+            <FileTree
+              sessionId={sessionId}
+              refreshTrigger={fileTreeTick}
+              onFileSelect={(path) => console.log('Selected:', path)}
+            />
+          ) : (
+            <HistoryPanel
+              currentSessionId={sessionId}
+              onSwitch={switchSession}
+              onNew={startNewSession}
+            />
+          )}
         </div>
 
         {/* Main */}
@@ -543,13 +787,12 @@ export default function oMLXInterpreter() {
                   </div>
                 );
               }
-
               return (
                 <div key={i} className={`msg-row ${msg.role}`}>
                   <div className={`bubble ${msg.role}`}>
                     {msg.role === 'assistant' ? (
                       <div className="prose">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
                           {msg.content}
                         </ReactMarkdown>
                         {msg.isInterrupted && (
@@ -575,7 +818,6 @@ export default function oMLXInterpreter() {
               <ArtifactRenderer key={i} artifact={art} />
             ))}
 
-            {/* Loading indicator — status message or thinking dots */}
             {isLoading && (
               <div className="msg-row assistant">
                 {statusMsg ? (
@@ -594,9 +836,7 @@ export default function oMLXInterpreter() {
                   </div>
                 ) : (
                   <div className="thinking">
-                    <div className="dot" />
-                    <div className="dot" />
-                    <div className="dot" />
+                    <div className="dot" /><div className="dot" /><div className="dot" />
                   </div>
                 )}
               </div>
@@ -616,14 +856,10 @@ export default function oMLXInterpreter() {
             )}
 
             <div className={`input-wrap${isLoading ? ' streaming' : ''}`} ref={modelDropRef}>
-              {/* Model selector */}
               <button
                 className="model-btn"
                 disabled={isLoading}
-                onClick={() => {
-                  if (!modelDropOpen) fetchModels();
-                  setModelDropOpen(v => !v);
-                }}
+                onClick={() => { if (!modelDropOpen) fetchModels(); setModelDropOpen(v => !v); }}
               >
                 {modelLabel}
                 <Chevron open={modelDropOpen} />
@@ -651,7 +887,6 @@ export default function oMLXInterpreter() {
                 </div>
               )}
 
-              {/* Text input — disabled while streaming */}
               <input
                 className="input-field"
                 type="text"
@@ -665,11 +900,9 @@ export default function oMLXInterpreter() {
                 disabled={isLoading}
               />
 
-              {/* Send / Stop */}
               {isLoading ? (
                 <button className="send-btn stop" onClick={interruptStream}>
-                  <StopIcon />
-                  STOP
+                  <StopIcon />STOP
                 </button>
               ) : (
                 <button

@@ -1,14 +1,17 @@
 # /backend/handlers/chat.py
 import asyncio
 import base64
+import json
 import mimetypes
 import os
 import re
+import textwrap
 import threading
 import traceback
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
 
 import httpx
 import tiktoken
@@ -52,7 +55,6 @@ def count_tokens(messages: list) -> int:
 
 # ---------------------------------------------------------------------------
 # System prompt — injected into every session
-# Keeps the model from doing things that break the headless environment.
 # ---------------------------------------------------------------------------
 SYSTEM_PROMPT = """You are a helpful coding assistant running inside oMLX Interpreter.
 
@@ -62,6 +64,97 @@ Environment rules — always follow these:
 - Dependencies: if a package is missing, install it with pip then proceed in the same response.
 - Be concise: don't over-explain after a successful execution. Show the output and confirm it worked.
 """
+
+
+# ---------------------------------------------------------------------------
+# Session persistence helpers
+# ---------------------------------------------------------------------------
+
+def _derive_title(first_user_content: str) -> str:
+    """First 60 chars of first user message, truncated at word boundary."""
+    text = first_user_content.strip().replace("\n", " ")
+    if len(text) <= 60:
+        return text
+    truncated = text[:60]
+    last_space = truncated.rfind(" ")
+    if last_space > 30:
+        return truncated[:last_space]
+    return truncated
+
+
+def load_session(session_id: str) -> Optional[dict]:
+    """Load session.json for a given session_id. Returns None if not found."""
+    session_file = SANDBOX_ROOT / session_id / "session.json"
+    if not session_file.exists():
+        return None
+    try:
+        return json.loads(session_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[SESSION] Failed to load {session_file}: {e}")
+        return None
+
+
+def save_session(
+    session_id: str,
+    sandbox_dir: Path,
+    model: str,
+    messages: list,
+    artifacts: list,
+    title: Optional[str],
+    created_at: str,
+):
+    """Write session.json after every completed turn."""
+    session_file = sandbox_dir / "session.json"
+
+    # Derive title once from first user message
+    if title is None:
+        user_msgs = [m for m in messages if m.get("role") == "user"]
+        if user_msgs:
+            first_content = user_msgs[0].get("content", "")
+            if isinstance(first_content, list):
+                # content blocks — grab first text block
+                for block in first_content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        first_content = block.get("text", "")
+                        break
+                else:
+                    first_content = ""
+            title = _derive_title(str(first_content))
+        else:
+            title = f"Session {session_id}"
+
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    # Convert interpreter message format to simple role/content pairs
+    simple_messages = []
+    for m in messages:
+        role = m.get("role", "")
+        content = m.get("content", "")
+        if isinstance(content, list):
+            # Flatten content blocks to string
+            content = " ".join(
+                str(b.get("content", "")) if isinstance(b, dict) else str(b)
+                for b in content
+            )
+        if role in ("user", "assistant"):
+            simple_messages.append({"role": role, "content": str(content)})
+
+    data = {
+        "session_id": session_id,
+        "created_at": created_at,
+        "updated_at": now,
+        "model": model.removeprefix("openai/"),
+        "title": title,
+        "messages": simple_messages,
+        "artifacts": artifacts,
+    }
+
+    try:
+        session_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[SESSION] Failed to save {session_file}: {e}")
+
+    return title
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +240,7 @@ def configure_interpreter(model: str, sandbox_dir: Path) -> None:
 def snapshot_sandbox(sandbox_dir: Path) -> Set[Path]:
     if not sandbox_dir.exists():
         return set()
-    return {p for p in sandbox_dir.rglob("*") if p.is_file()}
+    return {p for p in sandbox_dir.rglob("*") if p.is_file() and p.name != "session.json"}
 
 
 def build_file_artifact(path: Path, sandbox_dir: Path) -> Dict:
@@ -184,13 +277,38 @@ def build_file_artifact(path: Path, sandbox_dir: Path) -> Dict:
 # ---------------------------------------------------------------------------
 
 @router.websocket("/ws")
-async def chat_websocket(websocket: WebSocket):
+async def chat_websocket(websocket: WebSocket, session_id: Optional[str] = None):
     print("[WS] New connection — accepting", flush=True)
     await websocket.accept()
 
-    session_id  = str(uuid.uuid4())[:8]
+    # -----------------------------------------------------------------------
+    # Session resolution — resume or create new
+    # -----------------------------------------------------------------------
+    resuming = False
+    existing_session = None
+
+    if session_id:
+        existing_session = load_session(session_id)
+        if existing_session:
+            resuming = True
+            print(f"[WS] Resuming session {session_id}", flush=True)
+        else:
+            print(f"[WS] session_id {session_id!r} not found — creating new", flush=True)
+            session_id = None
+
+    if not session_id:
+        session_id = str(uuid.uuid4())[:8]
+
     sandbox_dir = SANDBOX_ROOT / session_id
     sandbox_dir.mkdir(parents=True, exist_ok=True)
+
+    created_at = (
+        existing_session["created_at"]
+        if resuming and existing_session
+        else datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    )
+
+    # Emit session ID first
     await websocket.send_json({"type": "session", "session_id": session_id})
     print(f"[WS] Sandbox: {sandbox_dir}", flush=True)
 
@@ -207,15 +325,39 @@ async def chat_websocket(websocket: WebSocket):
             pass
         return
 
+    # Load prior messages into interpreter if resuming
+    if resuming and existing_session:
+        prior_messages = existing_session.get("messages", [])
+        interpreter.messages = [
+            {"role": m["role"], "type": "message", "content": m["content"]}
+            for m in prior_messages
+        ]
+        # Override model to what was used in the session if available
+        saved_model = existing_session.get("model", "")
+        if saved_model:
+            full_model = f"openai/{saved_model.removeprefix('openai/')}"
+            configure_interpreter(full_model, sandbox_dir)
+            _initial_model = full_model
+
+        # Immediately emit context count for loaded history
+        used = count_tokens(interpreter.messages)
+        await websocket.send_json({"type": "context", "used": used, "max": CONTEXT_MAX})
+        print(f"[WS] Resumed — {len(interpreter.messages)} messages, {used} tokens")
+
     state: Dict[str, str] = {"model": _initial_model}
     stop_flag = threading.Event()
     stream_task: asyncio.Task | None = None
+
+    # Track session title (derived once, never recomputed)
+    session_title: Optional[str] = existing_session.get("title") if resuming and existing_session else None
+    # Track artifact metadata for session.json
+    session_artifacts: list = list(existing_session.get("artifacts", [])) if resuming and existing_session else []
 
     # -----------------------------------------------------------------------
     # Stream response
     # -----------------------------------------------------------------------
     async def stream_response(messages: List[Dict], ws: WebSocket):
-        nonlocal stop_flag
+        nonlocal stop_flag, session_title, session_artifacts
         loop = asyncio.get_event_loop()
         stop_flag.clear()
 
@@ -252,12 +394,11 @@ async def chat_websocket(websocket: WebSocket):
 
         current_code    = ""
         current_lang    = "python"
-        console_buf     = ""   # accumulates output lines within one console block
+        console_buf     = ""
 
-        # Track sandbox state to detect new non-script files (e.g. saved images)
         sandbox_before: Set[Path] = snapshot_sandbox(sandbox_dir)
-        # Track script filenames we've already emitted so we don't re-emit on done
         emitted_scripts: Set[str] = set()
+        turn_artifacts: list = []
 
         try:
             while True:
@@ -265,7 +406,6 @@ async def chat_websocket(websocket: WebSocket):
 
                 if chunk is None:
                     # Interpreter finished — emit any new files created during the session
-                    # (e.g. figure.png from plt.savefig) that weren't emitted as scripts
                     sandbox_after = snapshot_sandbox(sandbox_dir)
                     new_files = sandbox_after - sandbox_before
                     for fpath in sorted(new_files):
@@ -275,6 +415,12 @@ async def chat_websocket(websocket: WebSocket):
                                 file_artifact = build_file_artifact(fpath, sandbox_dir)
                                 await ws.send_json({"type": "artifact", "data": file_artifact})
                                 print(f"[FILE] Emitted on done: {fpath.name}")
+                                mime, _ = mimetypes.guess_type(str(fpath))
+                                turn_artifacts.append({
+                                    "type": "file",
+                                    "filename": rel,
+                                    "mime": mime or "application/octet-stream",
+                                })
                             except Exception as fe:
                                 print(f"[FILE] Failed: {fpath}: {fe}")
                     break
@@ -305,15 +451,12 @@ async def chat_websocket(websocket: WebSocket):
                     elif "content" in chunk:
                         current_code += chunk["content"]
                     elif "end" in chunk:
-                        # Save the code block as a file in the sandbox
                         ext_map = {
-                            # code
                             "python": "py", "javascript": "js", "typescript": "ts",
                             "bash": "sh", "shell": "sh", "ruby": "rb",
                             "rust": "rs", "go": "go", "java": "java",
                             "c": "c", "cpp": "cpp", "cs": "cs", "php": "php",
                             "swift": "swift", "kotlin": "kt", "r": "r", "sql": "sql",
-                            # markup / data / text
                             "markdown": "md", "md": "md",
                             "html": "html", "xml": "xml", "svg": "svg",
                             "css": "css", "scss": "scss",
@@ -337,27 +480,18 @@ async def chat_websocket(websocket: WebSocket):
                         }
                         ext = ext_map.get(current_lang, "txt")
 
-                        # Try to derive a meaningful filename from the content.
-                        # 1. First line is a shell shebang or a comment with a filename hint:
-                        #    e.g. "# recipe.md", "// utils.js", "<!-- index.html -->"
-                        # 2. First heading in markdown: "# Recipe Title" → recipe-title.md
-                        # 3. Fall back to script_{short_id}.{ext}
                         inferred_name: str | None = None
                         first_line = current_code.lstrip().split("\n")[0].strip()
 
-                        # Pattern: comment containing a filename with an extension
-                        # e.g. "# recipe.md", "// config.json", "<!-- index.html -->"
                         fname_comment = re.search(
                             r'[\w\-. ]+\.([a-zA-Z0-9]+)',
                             re.sub(r'^(#|//|/\*|<!--|--)', '', first_line).strip()
                         )
                         if fname_comment:
                             candidate = fname_comment.group(0).strip().replace(" ", "-")
-                            # Only accept if it has a recognised extension
                             if "." in candidate and len(candidate) <= 64:
                                 inferred_name = candidate
 
-                        # Markdown heading → slugified filename
                         if not inferred_name and ext == "md":
                             heading = re.match(r'^#{1,3}\s+(.+)', first_line)
                             if heading:
@@ -367,7 +501,6 @@ async def chat_websocket(websocket: WebSocket):
                                     inferred_name = f"{slug}.md"
 
                         code_filename = inferred_name or f"script_{uuid.uuid4().hex[:6]}.{ext}"
-                        # Ensure the extension matches the language even if inferred name had none
                         if "." not in code_filename:
                             code_filename = f"{code_filename}.{ext}"
 
@@ -386,15 +519,15 @@ async def chat_websocket(websocket: WebSocket):
                                 "content":  current_code,
                             },
                         })
+                        turn_artifacts.append({"type": "file", "filename": code_filename, "mime": mime})
 
                 # -- Computer console output — BUFFERED per block --
                 elif role == "computer" and chunk_type == "console":
                     if "start" in chunk:
-                        console_buf = ""  # start of a new console block
+                        console_buf = ""
                     elif chunk.get("format") == "output" and "content" in chunk:
-                        console_buf += chunk["content"]  # accumulate
+                        console_buf += chunk["content"]
                     elif "end" in chunk:
-                        # Emit the whole block as a single artifact
                         output = console_buf.strip()
                         if output:
                             await ws.send_json({
@@ -411,13 +544,24 @@ async def chat_websocket(websocket: WebSocket):
                     })
 
                 elif chunk_type == "confirmation":
-                    pass  # auto_run=True, never need to handle
+                    pass
 
             await ws.send_json({"type": "done"})
-            # Emit token usage after every completed turn
             used = count_tokens(interpreter.messages)
             await ws.send_json({"type": "context", "used": used, "max": CONTEXT_MAX})
             print(f"[TOKENS] used={used} / max={CONTEXT_MAX}")
+
+            # Accumulate artifacts and save session.json after every completed turn
+            session_artifacts = list({a["filename"]: a for a in session_artifacts + turn_artifacts if "filename" in a}.values())
+            session_title = save_session(
+                session_id=session_id,
+                sandbox_dir=sandbox_dir,
+                model=state["model"],
+                messages=interpreter.messages,
+                artifacts=session_artifacts,
+                title=session_title,
+                created_at=created_at,
+            )
 
         except asyncio.CancelledError:
             stop_flag.set()

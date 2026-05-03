@@ -15,6 +15,8 @@ def build_file_tree(root: Path):
         for item in sorted(root.iterdir()):
             if item.name.startswith('.'):
                 continue
+            if item.name == 'session.json':
+                continue
             node = {
                 "name": item.name,
                 "path": str(item.relative_to(root)),
