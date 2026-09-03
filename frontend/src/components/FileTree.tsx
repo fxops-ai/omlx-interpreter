@@ -55,11 +55,11 @@ export default function FileTree({ sessionId, refreshTrigger, onFileSelect }: {
           cursor: 'pointer', userSelect: 'none',
           background: hovered === node.path ? '#1a1a1a' : 'transparent',
           fontFamily: "'IBM Plex Mono', monospace",
-          fontSize: 12, color: '#e8e8e8',
+          fontSize: 14, color: '#e8e8e8',
           gap: 6,
         }}
       >
-        <span style={{ color: node.isDir ? '#00d4ff' : '#4a9eff', flexShrink: 0, fontSize: 10 }}>
+        <span style={{ color: node.isDir ? '#00d4ff' : '#4a9eff', flexShrink: 0, fontSize: 12 }}>
           {node.isDir ? (expanded.has(node.path) ? '▾' : '▸') : '·'}
         </span>
         <span style={{
@@ -69,7 +69,7 @@ export default function FileTree({ sessionId, refreshTrigger, onFileSelect }: {
           {node.name}
         </span>
         {node.size !== undefined && node.size > 0 && (
-          <span style={{ fontSize: 10, color: '#3a3a3a', flexShrink: 0 }}>
+          <span style={{ fontSize: 12, color: '#3a3a3a', flexShrink: 0 }}>
             {node.size < 1024 ? `${node.size}b` : `${(node.size / 1024).toFixed(1)}k`}
           </span>
         )}
@@ -86,7 +86,7 @@ export default function FileTree({ sessionId, refreshTrigger, onFileSelect }: {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         flexShrink: 0,
       }}>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#666', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: '#666', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
           Workspace
         </span>
         <button
@@ -105,12 +105,12 @@ export default function FileTree({ sessionId, refreshTrigger, onFileSelect }: {
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
         {!sessionId && (
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#3a3a3a', padding: '12px 8px' }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: '#3a3a3a', padding: '12px 8px' }}>
             waiting for session...
           </div>
         )}
         {sessionId && tree.length === 0 && !loading && (
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#3a3a3a', padding: '12px 8px' }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: '#3a3a3a', padding: '12px 8px' }}>
             no files yet
           </div>
         )}

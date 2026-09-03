@@ -1,10 +1,11 @@
-fastapi
-uvicorn[standard]
-open-interpreter @ git+https://github.com/openinterpreter/open-interpreter.git
-litellm
-pymupdf
-pdf2image
-pillow
-python-multipart
-pydantic
-tiktoken>=0.12.0
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+litellm==1.83.14
+pymupdf==1.27.2.3
+pdf2image==1.17.0
+pillow==12.2.0
+python-multipart==0.0.27
+pydantic==2.12.5
+tiktoken==0.12.0
+httpx==0.28.1
+python-dotenv==1.2.2

@@ -25,7 +25,9 @@ load_dotenv(dotenv_path=Path(__file__).parents[2] / ".env")
 
 router = APIRouter(prefix="/chat")
 
-OMLX_BASE    = "http://127.0.0.1:8000/v1"
+OMLX_BASE    = os.getenv("OMLX_BASE_URL", "http://127.0.0.1:8001/v1").rstrip("/")
+if not OMLX_BASE.endswith("/v1"):
+    OMLX_BASE = OMLX_BASE + "/v1"
 OMLX_API_KEY = os.getenv("OMLX_API_KEY", "dummy")
 
 SANDBOX_ROOT  = Path(__file__).parents[2] / "sandbox"

@@ -1,17 +1,22 @@
+# Open Interpreter is NOT listed here. Its PyPI metadata pins tiktoken<0.8 and
+# starlette<0.38, which conflict with Python 3.13 wheels and with FastAPI 0.136.
+# setup.sh installs open-interpreter==0.4.3 with --no-deps after this package.
 [project]
 name = "omlxi-backend"
 version = "0.1.0"
+requires-python = ">=3.13"
 dependencies = [
-    "fastapi",
-    "uvicorn[standard]",
-    "open-interpreter @ git+https://github.com/openinterpreter/open-interpreter.git",
-    "litellm",
-    "pymupdf",
-    "pdf2image",
-    "pillow",
-    "python-multipart",
-    "pydantic",
-    "tiktoken>=0.12.0"
+    "fastapi==0.136.1",
+    "uvicorn[standard]==0.46.0",
+    "litellm==1.83.14",
+    "pymupdf==1.27.2.3",
+    "pdf2image==1.17.0",
+    "pillow==12.2.0",
+    "python-multipart==0.0.27",
+    "pydantic==2.12.5",
+    "tiktoken==0.12.0",
+    "httpx==0.28.1",
+    "python-dotenv==1.2.2",
 ]
 
 [tool.setuptools]

@@ -57,7 +57,7 @@ The `--legacy-peer-deps` flag in the npm install is the deliberate tradeoff: it 
 
 ### 1. Install and start oMLX
 
-Download the `.dmg` from [oMLX Releases](https://github.com/jundot/omlx/releases), drag to Applications, and launch it. oMLX serves on `http://localhost:8000/v1` by default.
+Download the `.dmg` from [oMLX Releases](https://github.com/jundot/omlx/releases), drag to Applications, and launch it. oMLX serves on `http://localhost:8001/v1` on this machine.
 
 Or via Homebrew:
 
@@ -67,7 +67,7 @@ brew install omlx
 brew services start omlx
 ```
 
-Download at least one model via the oMLX admin UI at `http://localhost:8000/admin`.
+Download at least one model via the oMLX admin UI at `http://localhost:8001/admin`.
 
 ### 2. Clone and set up oMLX-Interpreter
 
@@ -120,7 +120,7 @@ Browser (localhost:3010)
         ↕  HTTP / SSE streaming
 FastAPI backend (localhost:8002)
         ↕  Open Interpreter (code execution, filesystem)
-        ↕  oMLX API (localhost:8000/v1)
+        ↕  oMLX API (localhost:8001/v1)
                 ↕  Local model weights (MLX, Apple Silicon)
 ```
 
@@ -130,13 +130,13 @@ The backend acts as an orchestration layer: it routes messages to oMLX for gener
 
 ## Configuration
 
-By default the backend expects oMLX at `http://localhost:8000`. To point it at a different host or port, set the environment variable before starting:
+By default the backend expects oMLX at `http://localhost:8001`. To point it at a different host or port, set the environment variable before starting:
 
 ```bash
-OMLX_BASE_URL=http://localhost:8000 uvicorn main:app --host 127.0.0.1 --port 8002 --reload
+OMLX_BASE_URL=http://localhost:8001/v1 uvicorn main:app --host 127.0.0.1 --port 8002 --reload
 ```
 
-Model selection is handled through the oMLX admin interface at `http://localhost:8000/admin`. Can also be selected in the chat interface at the user prompt.
+Model selection is handled through the oMLX admin interface at `http://localhost:8001/admin`. Can also be selected in the chat interface at the user prompt.
 
 ---
 
