@@ -21,15 +21,46 @@ from pydantic import BaseModel
 
 from interpreter import interpreter
 
+from . import omlx_mcp
+
 load_dotenv(dotenv_path=Path(__file__).parents[2] / ".env")
 
 router = APIRouter(prefix="/chat")
 
-OMLX_BASE    = "http://127.0.0.1:8000/v1"
+OMLX_BASE    = os.getenv("OMLX_BASE_URL", "http://127.0.0.1:8001/v1").rstrip("/")
+if not OMLX_BASE.endswith("/v1"):
+    OMLX_BASE = OMLX_BASE + "/v1"
 OMLX_API_KEY = os.getenv("OMLX_API_KEY", "dummy")
+DEFAULT_MODEL = os.getenv("OMLX_DEFAULT_MODEL", "gemma4-e4b")
 
 SANDBOX_ROOT  = Path(__file__).parents[2] / "sandbox"
 CONTEXT_MAX   = 32_000
+
+DATA_LANGS = {
+    "csv", "tsv", "json", "jsonl", "yaml", "yml", "toml", "ini", "xml", "txt",
+}
+
+UNSUPPORTED_OUTPUT_RE = re.compile(r"`[^`]+` disabled or not supported", re.I)
+
+
+class _DataFenceLang:
+    """No-op OI language so ```csv / ```json fences are saved as files, not executed."""
+
+    name = "csv"
+    aliases = ["csv", "tsv", "json", "jsonl", "yaml", "yml", "toml", "ini", "xml"]
+
+    def __init__(self, computer=None):
+        self.computer = computer
+
+    def run(self, code):
+        return
+        yield
+
+    def stop(self):
+        pass
+
+    def terminate(self):
+        pass
 
 # ---------------------------------------------------------------------------
 # Token counting helper
@@ -63,6 +94,8 @@ Environment rules — always follow these:
 - File output: when producing output files (images, CSVs, etc.), always save them to the current directory using relative paths.
 - Dependencies: if a package is missing, install it with pip then proceed in the same response.
 - Be concise: don't over-explain after a successful execution. Show the output and confirm it worked.
+- Web search: Brave Search tools are available. Use them for current facts, public datasets, and anything you would look up online. After results return, you may write Python to process them.
+- Data files: to produce CSV/JSON/YAML, write Python that writes the file (pathlib or csv). Do not emit a ```csv or ```json fence — those are not executable languages.
 """
 
 
@@ -136,7 +169,9 @@ def save_session(
                 str(b.get("content", "")) if isinstance(b, dict) else str(b)
                 for b in content
             )
-        if role in ("user", "assistant"):
+        if role == "user":
+            simple_messages.append({"role": role, "content": str(content)})
+        elif role == "assistant" and m.get("type", "message") == "message":
             simple_messages.append({"role": role, "content": str(content)})
 
     data = {
@@ -180,6 +215,21 @@ async def chat(request: ChatRequest):
 # Models endpoint
 # ---------------------------------------------------------------------------
 
+def _model_id(item: Dict[str, Any]) -> str:
+    return str(item.get("id", "")).removeprefix("openai/")
+
+
+def pick_default_model(ids: List[str]) -> str:
+    """Prefer gemma4-e4b (or OMLX_DEFAULT_MODEL); fall back to the first listed id."""
+    if not ids:
+        return ""
+    needle = DEFAULT_MODEL.lower()
+    for mid in ids:
+        if needle in mid.lower():
+            return mid
+    return ids[0]
+
+
 @router.get("/models")
 async def list_models():
     try:
@@ -189,16 +239,29 @@ async def list_models():
                 headers={"Authorization": f"Bearer {OMLX_API_KEY}"},
             )
             raw = resp.json()
-            models = [
-                {
-                    "id":    item["id"].removeprefix("openai/"),
-                    "label": item["id"].removeprefix("openai/"),
-                }
-                for item in raw.get("data", [])
-            ]
-            return {"models": models}
+            ids = [_model_id(item) for item in raw.get("data", []) if item.get("id")]
+            default_id = pick_default_model(ids)
+            models = [{"id": mid, "label": mid} for mid in ids]
+            return {"models": models, "default": default_id}
     except Exception as e:
         raise HTTPException(502, f"Could not reach oMLX server: {e}")
+
+
+@router.get("/mcp")
+async def mcp_status():
+    """MCP tools currently advertised by the oMLX server."""
+    tools = await asyncio.to_thread(omlx_mcp.fetch_mcp_tools, OMLX_BASE, OMLX_API_KEY, force=True)
+    return {
+        "connected": bool(tools),
+        "count": len(tools),
+        "tools": [
+            {
+                "name": t["function"]["name"],
+                "description": t["function"].get("description") or "",
+            }
+            for t in tools
+        ],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -215,8 +278,11 @@ async def get_active_model() -> str:
                     headers={"Authorization": f"Bearer {OMLX_API_KEY}"},
                 )
                 raw = resp.json()
-                model_id = raw["data"][0]["id"]
-                result = f"openai/{model_id.removeprefix('openai/')}"
+                ids = [_model_id(item) for item in raw.get("data", []) if item.get("id")]
+                model_id = pick_default_model(ids)
+                if not model_id:
+                    raise RuntimeError("oMLX returned no models")
+                result = f"openai/{model_id}"
                 print(f"[MODEL] Selected: {result}", flush=True)
                 return result
         except Exception as e:
@@ -231,10 +297,48 @@ def configure_interpreter(model: str, sandbox_dir: Path) -> None:
     interpreter.llm.model           = f"openai/{base_model}"
     interpreter.llm.api_key         = OMLX_API_KEY
     interpreter.llm.supports_vision = False
+    # oMLX does not implement OpenAI tool-calling. LiteLLM still reports
+    # supports_function_calling=True for any openai/* id, which drops Gemma's
+    # markdown/text into an empty assistant message after a long wait.
+    interpreter.llm.supports_functions = False
+    interpreter.llm.context_window  = CONTEXT_MAX
+    interpreter.llm.max_tokens      = min(4096, CONTEXT_MAX // 4)
     interpreter.auto_run            = True
+    interpreter.offline             = True
+    interpreter.verbose             = False
     interpreter.system_message      = SYSTEM_PROMPT
     interpreter.computer.cwd        = str(sandbox_dir)
-    print(f"[MODEL] Configured: openai/{base_model} | cwd={sandbox_dir}")
+    # Bypass LiteLLM so Brave/MCP tool_calls are executed, then text is
+    # handed back to Open Interpreter for markdown code execution.
+    interpreter.llm.completions     = omlx_mcp.omlx_completions
+    langs = list(interpreter.computer.terminal.languages)
+    if not any(getattr(lang, "name", None) == _DataFenceLang.name for lang in langs):
+        interpreter.computer.terminal.languages = langs + [_DataFenceLang]
+    print(f"[MODEL] Configured: openai/{base_model} | cwd={sandbox_dir}", flush=True)
+
+
+def _strip_fence(text: str) -> str:
+    cleaned = text.strip("\n")
+    cleaned = re.sub(r"^```[\w+-]*\s*\n?", "", cleaned)
+    cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+    return cleaned.strip() + ("\n" if cleaned.strip() else "")
+
+
+def _chunk_text(chunk: Dict[str, Any]) -> str:
+    content = chunk.get("content")
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                parts.append(str(block.get("text") or block.get("content") or ""))
+            else:
+                parts.append(str(block))
+        return "".join(parts)
+    return str(content)
 
 
 def snapshot_sandbox(sandbox_dir: Path) -> Set[Path]:
@@ -315,7 +419,10 @@ async def chat_websocket(websocket: WebSocket, session_id: Optional[str] = None)
     try:
         _initial_model = await get_active_model()
         configure_interpreter(_initial_model, sandbox_dir)
-        print(f"[WS] Ready — model={_initial_model}", flush=True)
+        mcp_tools = await asyncio.to_thread(
+            omlx_mcp.fetch_mcp_tools, OMLX_BASE, OMLX_API_KEY
+        )
+        print(f"[WS] Ready — model={_initial_model} | mcp_tools={len(mcp_tools)}", flush=True)
     except RuntimeError as e:
         print(f"[WS] Startup failed: {e}", flush=True)
         try:
@@ -369,6 +476,12 @@ async def chat_websocket(websocket: WebSocket, session_id: Optional[str] = None)
         ]
 
         def run_interpreter():
+            omlx_mcp.bind_turn(
+                status_cb=lambda text: loop.call_soon_threadsafe(
+                    queue.put_nowait, {"__status__": text}
+                ),
+                stop_flag=stop_flag,
+            )
             try:
                 interpreter.messages = conv[:-1]
                 last_content = conv[-1]["content"]
@@ -376,9 +489,10 @@ async def chat_websocket(websocket: WebSocket, session_id: Optional[str] = None)
 
                 for chunk in interpreter.chat(last_content, stream=True, display=False):
                     if stop_flag.is_set():
-                        print("[STREAM] stop_flag — exiting interpreter loop")
+                        print("[STREAM] stop_flag — exiting interpreter loop", flush=True)
                         break
-                    print(f"[CHUNK] {chunk}")
+                    kind = chunk.get("type") if isinstance(chunk, dict) else type(chunk).__name__
+                    print(f"[CHUNK] {kind}", flush=True)
                     loop.call_soon_threadsafe(queue.put_nowait, chunk)
 
             except Exception as e:
@@ -387,6 +501,7 @@ async def chat_websocket(websocket: WebSocket, session_id: Optional[str] = None)
                     traceback.print_exc()
                     loop.call_soon_threadsafe(queue.put_nowait, {"__error__": str(e)})
             finally:
+                omlx_mcp.unbind_turn()
                 loop.call_soon_threadsafe(queue.put_nowait, None)  # sentinel
 
         thread = threading.Thread(target=run_interpreter, daemon=True)
@@ -395,6 +510,7 @@ async def chat_websocket(websocket: WebSocket, session_id: Optional[str] = None)
         current_code    = ""
         current_lang    = "python"
         console_buf     = ""
+        emitted_text    = False
 
         sandbox_before: Set[Path] = snapshot_sandbox(sandbox_dir)
         emitted_scripts: Set[str] = set()
@@ -435,21 +551,35 @@ async def chat_websocket(websocket: WebSocket, session_id: Optional[str] = None)
                     await ws.send_json({"type": "error", "content": chunk["__error__"]})
                     continue
 
+                if "__status__" in chunk:
+                    text = str(chunk["__status__"] or "").strip()
+                    if text:
+                        await ws.send_json({"type": "status", "content": text})
+                    continue
+
                 role       = chunk.get("role")
                 chunk_type = chunk.get("type")
 
                 # -- Assistant text --
-                if role == "assistant" and chunk_type == "message":
-                    if "content" in chunk:
-                        await ws.send_json({"type": "delta", "content": chunk["content"]})
+                if chunk_type == "message" and role in (None, "assistant"):
+                    text = _chunk_text(chunk)
+                    if text:
+                        emitted_text = True
+                        await ws.send_json({"type": "delta", "content": text})
 
                 # -- Assistant code --
-                elif role == "assistant" and chunk_type == "code":
+                elif chunk_type == "code" and role in (None, "assistant"):
                     if "start" in chunk:
                         current_code = ""
                         current_lang = chunk.get("format", "python")
+                        lang_key = str(current_lang).lower()
+                        saving = lang_key in DATA_LANGS or lang_key in _DataFenceLang.aliases
+                        await ws.send_json({
+                            "type": "status",
+                            "content": f"saving {current_lang}…" if saving else f"running {current_lang}…",
+                        })
                     elif "content" in chunk:
-                        current_code += chunk["content"]
+                        current_code += _chunk_text(chunk)
                     elif "end" in chunk:
                         ext_map = {
                             "python": "py", "javascript": "js", "typescript": "ts",
@@ -479,6 +609,7 @@ async def chat_websocket(websocket: WebSocket, session_id: Optional[str] = None)
                             "sql":  "text/x-sql",
                         }
                         ext = ext_map.get(current_lang, "txt")
+                        current_code = _strip_fence(current_code)
 
                         inferred_name: str | None = None
                         first_line = current_code.lstrip().split("\n")[0].strip()
@@ -499,6 +630,9 @@ async def chat_websocket(websocket: WebSocket, session_id: Optional[str] = None)
                                 slug = re.sub(r'[\s_]+', '-', slug).strip('-')[:40]
                                 if slug:
                                     inferred_name = f"{slug}.md"
+
+                        if not inferred_name and ext in ("csv", "json", "yaml", "yml", "tsv", "toml"):
+                            inferred_name = f"data_{uuid.uuid4().hex[:6]}.{ext}"
 
                         code_filename = inferred_name or f"script_{uuid.uuid4().hex[:6]}.{ext}"
                         if "." not in code_filename:
@@ -526,15 +660,15 @@ async def chat_websocket(websocket: WebSocket, session_id: Optional[str] = None)
                     if "start" in chunk:
                         console_buf = ""
                     elif chunk.get("format") == "output" and "content" in chunk:
-                        console_buf += chunk["content"]
+                        console_buf += _chunk_text(chunk)
                     elif "end" in chunk:
                         output = console_buf.strip()
-                        if output:
+                        console_buf = ""
+                        if output and not UNSUPPORTED_OUTPUT_RE.search(output):
                             await ws.send_json({
                                 "type": "artifact",
                                 "data": {"type": "output", "content": output},
                             })
-                        console_buf = ""
 
                 # -- Images / HTML --
                 elif chunk_type in ("image", "html") and "content" in chunk:
@@ -546,10 +680,19 @@ async def chat_websocket(websocket: WebSocket, session_id: Optional[str] = None)
                 elif chunk_type == "confirmation":
                     pass
 
+            if not emitted_text and not stop_flag.is_set():
+                leftover = (console_buf or current_code or "").strip()
+                fallback = leftover or (
+                    "The model finished without returning any text. "
+                    "Try again, or ask it to write a CSV from Census county population estimates."
+                )
+                await ws.send_json({"type": "delta", "content": fallback})
+                print("[STREAM] empty assistant text — sent fallback", flush=True)
+
             await ws.send_json({"type": "done"})
             used = count_tokens(interpreter.messages)
             await ws.send_json({"type": "context", "used": used, "max": CONTEXT_MAX})
-            print(f"[TOKENS] used={used} / max={CONTEXT_MAX}")
+            print(f"[TOKENS] used={used} / max={CONTEXT_MAX}", flush=True)
 
             # Accumulate artifacts and save session.json after every completed turn
             session_artifacts = list({a["filename"]: a for a in session_artifacts + turn_artifacts if "filename" in a}.values())

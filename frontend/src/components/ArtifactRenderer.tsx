@@ -39,15 +39,15 @@ function TextFileArtifact({ artifact }: { artifact: any }) {
         background: '#161616',
         borderBottom: '1px solid #2a2a2a',
       }}>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: '#a3a3a3' }}>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 14, color: '#a3a3a3' }}>
           {filename}
-          <span style={{ marginLeft: 8, color: '#444', fontSize: 11 }}>{lang}</span>
+          <span style={{ marginLeft: 8, color: '#444', fontSize: 13 }}>{lang}</span>
         </span>
         <a
           href={downloadHref}
           download={filename}
           style={{
-            fontSize: 11,
+            fontSize: 13,
             color: '#6366f1',
             textDecoration: 'none',
             fontFamily: "'IBM Plex Mono', monospace",
@@ -63,7 +63,7 @@ function TextFileArtifact({ artifact }: { artifact: any }) {
         margin: 0,
         padding: '12px 16px',
         fontFamily: "'IBM Plex Mono', monospace",
-        fontSize: 12,
+        fontSize: 14,
         color: '#e5e5e5',
         overflowX: 'auto',
         maxHeight: 480,
@@ -111,11 +111,12 @@ export default function ArtifactRenderer({ artifact }: { artifact: any }) {
         borderRadius: 12,
         padding: '12px 16px',
         fontFamily: "'IBM Plex Mono', monospace",
-        fontSize: 12,
-        color: '#22c55e',
+        fontSize: 14,
+        color: '#4ade80',
         overflowX: 'auto',
         maxHeight: 384,
         overflowY: 'auto',
+        overflowWrap: 'anywhere',
         whiteSpace: 'pre-wrap',
         lineHeight: 1.6,
       }}>
@@ -145,14 +146,14 @@ export default function ArtifactRenderer({ artifact }: { artifact: any }) {
             background: '#161616',
             borderBottom: '1px solid #2a2a2a',
           }}>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: '#a3a3a3' }}>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 14, color: '#a3a3a3' }}>
               {filename}
             </span>
             <a
               href={href}
               download={filename}
               style={{
-                fontSize: 11,
+                fontSize: 13,
                 color: '#6366f1',
                 textDecoration: 'none',
                 fontFamily: "'IBM Plex Mono', monospace",
@@ -164,7 +165,7 @@ export default function ArtifactRenderer({ artifact }: { artifact: any }) {
               Download
             </a>
           </div>
-          <div style={{ padding: '12px 16px', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: '#666' }}>
+          <div style={{ padding: '12px 16px', fontFamily: "'IBM Plex Mono', monospace", fontSize: 14, color: '#666' }}>
             {mime} · binary
           </div>
         </div>
@@ -183,7 +184,7 @@ export default function ArtifactRenderer({ artifact }: { artifact: any }) {
       padding: '16px',
       background: '#111',
       fontFamily: "'IBM Plex Mono', monospace",
-      fontSize: 12,
+      fontSize: 14,
       color: '#666',
     }}>
       <pre style={{ whiteSpace: 'pre-wrap', overflow: 'auto', margin: 0 }}>
