@@ -9,7 +9,7 @@ import FileTree from '../components/FileTree';
 import ArtifactRenderer from '../components/ArtifactRenderer';
 import CodeApproval from '../components/CodeApproval';
 import { uploadAttachment } from '../lib/api';
-import { BACKEND_WS } from '../lib/config';
+import { BACKEND_WS, DEFAULT_MODEL } from '../lib/config';
 
 // ---------------------------------------------------------------------------
 // Self-contained styles
@@ -24,9 +24,9 @@ const css = `
     --surface:     #111111;
     --border:      #222222;
     --border-mid:  #2a2a2a;
-    --text:        #e8e8e8;
-    --text-dim:    #666666;
-    --text-faint:  #3a3a3a;
+    --text:        #f4f4f5;
+    --text-dim:    #a1a1aa;
+    --text-faint:  #71717a;
     --accent:      #00d4ff;
     --accent-dim:  rgba(0, 212, 255, 0.12);
     --user-bg:     #1a1a2e;
@@ -77,7 +77,7 @@ const css = `
 
   .bubble        { max-width: 720px; padding: 16px 20px; border-radius: var(--radius-lg); font-size: var(--fs-base); line-height: var(--lh); overflow-wrap: anywhere; word-break: break-word; }
   .bubble.user   { background: var(--user-bg); border: 1px solid var(--user-border); color: var(--text); border-bottom-right-radius: 4px; }
-  .bubble.assistant { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-bottom-left-radius: 4px; }
+  .bubble.assistant { background: var(--surface); border: 1px solid var(--border); color: #f4f4f5; border-bottom-left-radius: 4px; }
 
   .interrupted-badge {
     display: inline-flex; align-items: center; gap: 5px;
@@ -91,21 +91,30 @@ const css = `
   .error-msg     { max-width: 720px; padding: 14px 18px; border-radius: var(--radius); background: var(--error-bg); border: 1px solid var(--error-border); color: var(--error-text); font-family: var(--font-mono); font-size: var(--fs-md); line-height: var(--lh); overflow-wrap: anywhere; }
   .error-label   { font-size: var(--fs-xs); letter-spacing: 0.1em; text-transform: uppercase; color: #ef4444; margin-bottom: 6px; opacity: 0.8; }
 
-  .prose p                { margin-bottom: 10px; }
-  .prose p:last-child     { margin-bottom: 0; }
-  .prose code             { font-family: var(--font-mono); font-size: 0.9em; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; }
-  .prose pre              { background: #0d0d0d; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; overflow-x: auto; margin: 10px 0; }
-  .prose pre code         { background: none; padding: 0; font-size: var(--fs-md); }
-  .prose h1               { margin: 14px 0 8px; font-weight: 500; letter-spacing: -0.01em; font-size: 1.35em; }
-  .prose h2               { margin: 14px 0 8px; font-weight: 500; letter-spacing: -0.01em; font-size: 1.2em; }
-  .prose h3               { margin: 14px 0 8px; font-weight: 500; letter-spacing: -0.01em; font-size: 1.1em; }
-  .prose ul,.prose ol     { padding-left: 20px; margin: 8px 0; }
-  .prose li               { margin-bottom: 4px; }
-  .prose a                { color: var(--accent); text-decoration: none; }
-  .prose a:hover          { text-decoration: underline; }
-  .prose table            { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: var(--fs-md); }
-  .prose th               { background: rgba(255,255,255,0.04); padding: 8px 12px; border: 1px solid var(--border); text-align: left; font-weight: 500; }
-  .prose td               { padding: 8px 12px; border: 1px solid var(--border); }
+  .md-body                 { color: #f4f4f5; }
+  .md-body p               { margin-bottom: 10px; color: inherit; }
+  .md-body p:last-child    { margin-bottom: 0; }
+  .md-body strong,
+  .md-body b               { color: #ffffff; font-weight: 500; }
+  .md-body em              { color: #f4f4f5; }
+  .md-body code            { font-family: var(--font-mono); font-size: 0.9em; background: rgba(255,255,255,0.08); color: #fafafa; padding: 2px 6px; border-radius: 4px; }
+  .md-body pre             { background: #0d0d0d; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; overflow-x: auto; margin: 10px 0; }
+  .md-body pre code        { background: none; padding: 0; font-size: var(--fs-md); color: #f4f4f5; }
+  .md-body h1,
+  .md-body h2,
+  .md-body h3              { margin: 14px 0 8px; font-weight: 500; letter-spacing: -0.01em; color: #ffffff; }
+  .md-body h1              { font-size: 1.35em; }
+  .md-body h2              { font-size: 1.2em; }
+  .md-body h3              { font-size: 1.1em; }
+  .md-body ul,.md-body ol  { padding-left: 20px; margin: 8px 0; color: inherit; }
+  .md-body li              { margin-bottom: 4px; color: inherit; }
+  .md-body a               { color: #7dd3fc; text-decoration: none; }
+  .md-body a:hover         { text-decoration: underline; color: #bae6fd; }
+  .md-body blockquote      { margin: 10px 0; padding: 4px 0 4px 14px; border-left: 3px solid #52525b; color: #e4e4e7; }
+  .md-body hr              { border: none; border-top: 1px solid #3f3f46; margin: 14px 0; }
+  .md-body table           { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: var(--fs-md); color: inherit; }
+  .md-body th              { background: rgba(255,255,255,0.06); padding: 8px 12px; border: 1px solid var(--border); text-align: left; font-weight: 500; color: #ffffff; }
+  .md-body td              { padding: 8px 12px; border: 1px solid var(--border); color: inherit; }
 
   .attachments   { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
   .att-chip      { font-size: var(--fs-sm); font-family: var(--font-mono); background: rgba(255,255,255,0.06); border: 1px solid var(--border); padding: 4px 12px; border-radius: 20px; display: flex; align-items: center; gap: 5px; }
@@ -194,11 +203,19 @@ const css = `
   .drop-overlay  { position: absolute; inset: 0; background: rgba(0, 212, 255, 0.06); border: 2px dashed var(--accent); display: flex; align-items: center; justify-content: center; z-index: 50; pointer-events: none; }
   .drop-label    { font-family: var(--font-mono); font-size: 16px; color: var(--accent); letter-spacing: 0.08em; }
 
-  .thinking      { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); border-bottom-left-radius: 4px; width: fit-content; }
-  .dot           { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); opacity: 0.4; animation: pulse 1.2s ease-in-out infinite; }
-  .dot:nth-child(2) { animation-delay: 0.2s; }
-  .dot:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes pulse { 0%,100% { opacity: 0.2; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.1); } }
+  .status-bubble {
+    width: fit-content; max-width: 720px;
+    padding: 12px 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); border-bottom-left-radius: 4px;
+    font-family: var(--font-mono); font-size: var(--fs-sm);
+    color: #d4d4d8; letter-spacing: 0.04em;
+    animation: statusPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes statusPulse {
+    0%, 100% { color: #a1a1aa; border-color: var(--border); }
+    50%      { color: #f4f4f5; border-color: var(--border-mid); }
+  }
 
   /* ---- Context window bar ---- */
   .ctx-bar-wrap {
@@ -501,6 +518,7 @@ export default function oMLXInterpreter() {
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [modelDropOpen, setModelDropOpen] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
+  const [mcpLabel, setMcpLabel]           = useState<string | null>(null);
   const modelDropRef                      = useRef<HTMLDivElement>(null);
 
   const wsRef          = useRef<WebSocket | null>(null);
@@ -528,7 +546,14 @@ export default function oMLXInterpreter() {
       const data = await res.json();
       const list: ModelOption[] = data.models ?? [];
       setModels(list);
-      if (list.length > 0 && !selectedModel) setSelectedModel(list[0].id);
+      if (list.length > 0 && !selectedModel) {
+        const needle = DEFAULT_MODEL.toLowerCase();
+        const preferred =
+          (typeof data.default === 'string' && data.default) ||
+          list.find(m => m.id.toLowerCase().includes(needle))?.id ||
+          list[0].id;
+        setSelectedModel(preferred);
+      }
     } catch (e) {
       console.error('[models] fetch failed:', e);
     }
@@ -536,6 +561,18 @@ export default function oMLXInterpreter() {
   };
 
   useEffect(() => { fetchModels(); }, []);
+
+  useEffect(() => {
+    fetch('/api/chat/mcp')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (!data?.connected || !data.count) return;
+        const names: string[] = (data.tools || []).map((t: { name?: string }) => t.name || '');
+        const brave = names.some(n => n.toLowerCase().includes('brave'));
+        setMcpLabel(brave ? 'Brave search' : `${data.count} MCP tool${data.count === 1 ? '' : 's'}`);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!modelDropOpen) return;
@@ -574,7 +611,7 @@ export default function oMLXInterpreter() {
 
       if (chunk.type === 'session') { setSessionId(chunk.session_id); return; }
 
-      if (chunk.type === 'delta' && chunk.content) {
+      if (chunk.type === 'delta' && typeof chunk.content === 'string' && chunk.content.length > 0) {
         setStatusMsg(null);
         setMessages(prev => {
           const next = [...prev];
@@ -592,7 +629,6 @@ export default function oMLXInterpreter() {
       if (chunk.type === 'status') { setStatusMsg(chunk.content ?? null); return; }
 
       if (chunk.type === 'artifact' && chunk.data) {
-        setStatusMsg(null);
         setArtifacts(prev => [...prev, chunk.data]);
         if (chunk.data.type === 'file') setFileTreeTick(t => t + 1);
         return;
@@ -699,7 +735,7 @@ export default function oMLXInterpreter() {
     setPendingAttachments([]);
     setInput('');
     setArtifacts([]);
-    setStatusMsg(null);
+    setStatusMsg('thinking…');
     setIsLoading(true);
 
     const history = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }));
@@ -728,6 +764,11 @@ export default function oMLXInterpreter() {
   const modelLabel = selectedModel
     ? (selectedModel.length > 22 ? selectedModel.slice(0, 20) + '…' : selectedModel)
     : '…';
+
+  const lastMsg = messages[messages.length - 1];
+  const waitLabel = isLoading
+    ? (statusMsg || (lastMsg?.role === 'assistant' && !lastMsg?.isError ? null : 'thinking…'))
+    : null;
 
   if (!mounted) return null;
 
@@ -815,7 +856,7 @@ export default function oMLXInterpreter() {
                 <div key={i} className={`msg-row ${msg.role}`}>
                   <div className={`bubble ${msg.role}`}>
                     {msg.role === 'assistant' ? (
-                      <div className="prose">
+                      <div className="md-body">
                         <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
                           {msg.content}
                         </ReactMarkdown>
@@ -842,27 +883,9 @@ export default function oMLXInterpreter() {
               <ArtifactRenderer key={i} artifact={art} />
             ))}
 
-            {isLoading && (
+            {waitLabel && (
               <div className="msg-row assistant">
-                {statusMsg ? (
-                  <div style={{
-                    padding: '8px 14px',
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-lg)',
-                    borderBottomLeftRadius: 4,
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 13,
-                    color: 'var(--text-dim)',
-                    letterSpacing: '0.05em',
-                  }}>
-                    {statusMsg}
-                  </div>
-                ) : (
-                  <div className="thinking">
-                    <div className="dot" /><div className="dot" /><div className="dot" />
-                  </div>
-                )}
+                <div className="status-bubble" role="status">{waitLabel}</div>
               </div>
             )}
 
@@ -944,7 +967,7 @@ export default function oMLXInterpreter() {
             <p className="input-hint">
               {isLoading
                 ? 'press ESC or click STOP to interrupt'
-                : 'PDF · IMAGES · MARKDOWN · JSON · SANDBOXED PYTHON'}
+                : `PDF · IMAGES · MARKDOWN · JSON · SANDBOXED PYTHON${mcpLabel ? ` · ${mcpLabel}` : ''}`}
             </p>
           </div>
         </div>

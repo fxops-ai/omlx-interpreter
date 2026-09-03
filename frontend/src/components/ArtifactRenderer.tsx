@@ -112,10 +112,11 @@ export default function ArtifactRenderer({ artifact }: { artifact: any }) {
         padding: '12px 16px',
         fontFamily: "'IBM Plex Mono', monospace",
         fontSize: 14,
-        color: '#22c55e',
+        color: '#4ade80',
         overflowX: 'auto',
         maxHeight: 384,
         overflowY: 'auto',
+        overflowWrap: 'anywhere',
         whiteSpace: 'pre-wrap',
         lineHeight: 1.6,
       }}>
