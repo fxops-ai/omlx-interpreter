@@ -10,7 +10,7 @@
     "@codesandbox/sandpack-react": "^2.20.0",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.14.0",
-    "next": "15.0.0",
+    "next": "16.3.5",
     "react": "19.0.0-rc-65a56d0e-20241020",
     "react-dom": "19.0.0-rc-65a56d0e-20241020",
     "react-dropzone": "^14.2.3",
@@ -30,7 +30,7 @@
     "@types/node": "25.6.0",
     "@types/react": "19.2.14",
     "autoprefixer": "^10.5.0",
-    "postcss": "^8.5.13",
+    "postcss": "^8.5.23",
     "typescript": "6.0.3"
   }
 }
