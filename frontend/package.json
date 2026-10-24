@@ -10,7 +10,7 @@
     "@codesandbox/sandpack-react": "^2.20.0",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.14.0",
-    "next": "15.0.0",
+    "next": "15.5.28",
     "react": "19.0.0-rc-65a56d0e-20241020",
     "react-dom": "19.0.0-rc-65a56d0e-20241020",
     "react-dropzone": "^14.2.3",
